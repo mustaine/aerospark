@@ -25,7 +25,7 @@ import com.osscube.spark.aerospike.{AerospikeUtils, AqlParser}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StructType, _}
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import scala.collection.JavaConverters._
 
@@ -33,7 +33,7 @@ case class AeroRelation(initialHost: String,
                         select: String,
                         partitionsPerServer: Int = 1,
                         useUdfWithoutIndexQuery: Boolean = false)(@transient val sqlContext: SQLContext)
-  extends BaseRelation with PrunedFilteredScan {
+  extends BaseRelation with InsertableRelation with PrunedFilteredScan {
 
   var schemaCache: StructType = null
   var nodeList: Array[Node] = null
@@ -197,5 +197,15 @@ case class AeroRelation(initialHost: String,
     else {
       new AerospikeRDD(sqlContext.sparkContext, nodeList, namespaceCache, setCache, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache)
     }
+  }
+
+  override def insert(data: DataFrame, overwrite: Boolean) = {
+    println("insert trying")
+    println(overwrite)
+    println(data)
+    data.rdd.saveToAerospike(initialHost,"test", "testingMore")
+//    data.write
+//      .mode(if (overwrite) SaveMode.Overwrite else SaveMode.Append)
+//      .aerospike
   }
 }
