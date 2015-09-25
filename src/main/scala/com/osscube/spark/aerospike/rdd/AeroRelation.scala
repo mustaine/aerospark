@@ -32,28 +32,31 @@ import scala.collection.JavaConverters._
 case class AeroRelation(initialHost: String,
                         select: String,
                         partitionsPerServer: Int = 1,
-                        useUdfWithoutIndexQuery: Boolean = false)(@transient val sqlContext: SQLContext)
+                        useUdfWithoutIndexQuery: Boolean = false,
+                        keyColumn: Option[String] = None)(@transient val sqlContext: SQLContext)
   extends BaseRelation with InsertableRelation with PrunedFilteredScan {
 
   var schemaCache: StructType = null
   var nodeList: Array[Node] = null
-  var namespaceCache: String = null
-  var setCache: String = null
+  var namespace: String = null
+  var set: String = null
   var filterTypeCache: AeroFilterType = FilterNone
   var filterBinCache: String = null
   var filterValsCache: Seq[(Long, Long)] = null
   var filterStringValCache: String = null
 
   override def schema: StructType = {
-
+    println("schema")
     if (schemaCache == null && nodeList == null) {
-      val (namespace, set, bins, filterType, filterBin, filterVals, filterStringVal) = AqlParser.parseSelect(select, partitionsPerServer).toArray()
-      namespaceCache = namespace
-      setCache = set
-      filterTypeCache = filterType
-      filterBinCache = filterBin
-      filterValsCache = filterVals
-      filterStringValCache = filterStringVal
+      println("building schema")
+//      val (namespace, set, bins, filterType, filterBin, filterVals, filterStringVal) = AqlParser.parseSelect(select, partitionsPerServer).toArray()
+      val queryParams: QueryParams = AqlParser.parseSelect(select, partitionsPerServer)
+      namespace = queryParams.namespace
+      set = queryParams.set
+      filterTypeCache = queryParams.filterType
+      filterBinCache = queryParams.filterBin
+      filterValsCache = queryParams.filterVals
+      filterStringValCache = queryParams.filterStringVal
       val splitHost = initialHost.split(":")
       val client = new AerospikeClient(null, splitHost(0), splitHost(1).toInt)
 
@@ -63,8 +66,8 @@ case class AeroRelation(initialHost: String,
         val stmt = new Statement()
         stmt.setNamespace(namespace)
         stmt.setSetName(set)
-        if (bins.length > 1 || bins.head != "*")
-          stmt.setBinNames(bins: _*)
+        if (queryParams.bins.length > 1 || queryParams.bins.head != "*")
+          stmt.setBinNames(queryParams.bins: _*)
 
         val qp: QueryPolicy = client.queryPolicyDefault
         qp.maxConcurrentNodes = 1
@@ -76,8 +79,8 @@ case class AeroRelation(initialHost: String,
 
           if (iterator.hasNext) {
             val record = iterator.next().record
-            var binNames = bins
-            if (bins.length == 1 && bins.head == "*") {
+            var binNames = queryParams.bins
+            if (queryParams.bins.length == 1 && queryParams.bins.head == "*") {
               binNames = record.bins.keySet.asScala.toSeq
             }
             schemaCache = StructType(binNames.map { b =>
@@ -100,6 +103,9 @@ case class AeroRelation(initialHost: String,
   }
 
   override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
+    println("buildScan")
+    println(requiredColumns)
+    (filters.foreach(println(_)))
     if (schemaCache == null && nodeList == null) {
       schema //ensure def schema always called before this method
     }
@@ -109,7 +115,7 @@ case class AeroRelation(initialHost: String,
 
       def checkIndex(attr: String): Boolean = {
         index_info
-          .filter(_.contains("ns=" + namespaceCache + ":set=" + setCache + ":"))
+          .filter(_.contains("ns=" + namespace + ":set=" + set + ":"))
           .filter(_.contains(":bins=" + attr + ":"))
           .length > 0
       }
@@ -188,14 +194,14 @@ case class AeroRelation(initialHost: String,
           tuples = (0 until partitionsPerServer)
             .map(i => (lower + divided * i, if (i == partitionsPerServer - 1) upper else lower + divided * (i + 1) - 1))
         }
-        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespaceCache, setCache, requiredColumns, filterType, filterBin, filterStringVal, tuples, allFilters, schemaCache, useUdfWithoutIndexQuery)
+        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterType, filterBin, filterStringVal, tuples, allFilters, schemaCache, useUdfWithoutIndexQuery)
       }
       else {
-        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespaceCache, setCache, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache, allFilters, schemaCache, useUdfWithoutIndexQuery)
+        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache, allFilters, schemaCache, useUdfWithoutIndexQuery)
       }
     }
     else {
-      new AerospikeRDD(sqlContext.sparkContext, nodeList, namespaceCache, setCache, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache)
+      new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache)
     }
   }
 
@@ -203,9 +209,12 @@ case class AeroRelation(initialHost: String,
     println("insert trying")
     println(overwrite)
     println(data)
-    data.rdd.saveToAerospike(initialHost,"test", "testingMore")
-//    data.write
-//      .mode(if (overwrite) SaveMode.Overwrite else SaveMode.Append)
-//      .aerospike
+    println("key-column: " + keyColumn)
+
+    data.saveToAerospike(initialHost, namespace, set)
+    //    data.write
+    //      .mode(if (overwrite) SaveMode.Overwrite else SaveMode.Append)
+    //      .aerospike
   }
+
 }

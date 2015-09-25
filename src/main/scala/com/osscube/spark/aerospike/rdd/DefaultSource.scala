@@ -26,9 +26,12 @@ class DefaultSource extends RelationProvider {
     val partitionsPerServerPresent: Boolean = parameters.contains("partitionsPerServer") && !parameters("partitionsPerServer").isEmpty
     val useUdfWithoutIndexQueryPresent: Boolean = parameters.contains("useUdfWithoutIndexQuery") && !parameters("useUdfWithoutIndexQuery").isEmpty
     val useUdfWithoutIndexQuery = if (useUdfWithoutIndexQueryPresent) parameters("useUdfWithoutIndexQuery") == "true" else false
-    if(partitionsPerServerPresent)
-      AeroRelation(parameters("initialHost"), parameters("select"), parameters("partitionsPerServer").toInt, useUdfWithoutIndexQuery)(sqlContext)
+    if (partitionsPerServerPresent)
+      AeroRelation(parameters("initialHost"), parameters("select"), parameters("partitionsPerServer").toInt,
+        useUdfWithoutIndexQuery, parameters.get("keyColumn"))(sqlContext)
     else
-      AeroRelation(parameters("initialHost"), parameters("select"), 1, useUdfWithoutIndexQuery)(sqlContext)
+      AeroRelation(parameters("initialHost"), parameters("select"), 1, useUdfWithoutIndexQuery,
+        parameters.get("keyColumn"))(sqlContext)
   }
+
 }

@@ -16,7 +16,7 @@ package com.osscube.spark.aerospike
 
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{DataFrame, SQLContext}
 
 import scala.language.implicitConversions
 
@@ -30,6 +30,10 @@ package object rdd {
 
   implicit def toRDDFunctions[T](rdd: RDD[T]): RDDFunctions[T] =
     new RDDFunctions(rdd)
+
+  implicit def toDataFrameFunctions(data: DataFrame): DataFrameFunction =
+    new DataFrameFunction(data)
+
 
   implicit def AeroContext(sc: SparkContext): SparkContextFunctions =
     new SparkContextFunctions(sc)

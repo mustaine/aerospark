@@ -39,7 +39,7 @@ object AqlParser {
 
     val tokenised = tokeniseQuery(aqlStatement)
 
-    val bins = tokenised(1).split(",")
+    val bins = tokenised(1).split(",").toSeq
     val namespaceAndSet = tokenised(3).split("\\.")
     val namespace = namespaceAndSet(0)
     val set = if (namespaceAndSet.length > 1) namespaceAndSet(1) else ""
