@@ -20,7 +20,7 @@ import java.lang
 import com.aerospike.client.cluster.Node
 import com.aerospike.client.policy.QueryPolicy
 import com.aerospike.client.query.{RecordSet, Statement}
-import com.aerospike.client.{AerospikeClient, Info}
+import com.aerospike.client.{AerospikeClient, Info, Record}
 import com.osscube.spark.aerospike.{AerospikeUtils, AqlParser}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.sources._
@@ -36,7 +36,7 @@ case class AeroRelation(initialHost: String,
                         keyColumn: Option[String] = None)(@transient val sqlContext: SQLContext)
   extends BaseRelation with InsertableRelation with PrunedFilteredScan {
 
-  var schemaCache: StructType = null
+  var schemaCache: Option[StructType] = None
   var nodeList: Array[Node] = null
   var namespace: String = null
   var set: String = null
@@ -47,9 +47,8 @@ case class AeroRelation(initialHost: String,
 
   override def schema: StructType = {
     println("schema")
-    if (schemaCache == null && nodeList == null) {
+    if (!schemaCache.isDefined && nodeList == null) {
       println("building schema")
-//      val (namespace, set, bins, filterType, filterBin, filterVals, filterStringVal) = AqlParser.parseSelect(select, partitionsPerServer).toArray()
       val queryParams: QueryParams = AqlParser.parseSelect(select, partitionsPerServer)
       namespace = queryParams.namespace
       set = queryParams.set
@@ -76,20 +75,8 @@ case class AeroRelation(initialHost: String,
         val recs: RecordSet = client.queryNode(qp, stmt, nodeList.head)
         try {
           val iterator = recs.iterator()
-
           if (iterator.hasNext) {
-            val record = iterator.next().record
-            var binNames = queryParams.bins
-            if (queryParams.bins.length == 1 && queryParams.bins.head == "*") {
-              binNames = record.bins.keySet.asScala.toSeq
-            }
-            schemaCache = StructType(binNames.map { b =>
-              record.bins.get(b) match {
-                case v: Integer => StructField(b, IntegerType, nullable = true)
-                case v: lang.Long => StructField(b, LongType, nullable = true)
-                case _ => StructField(b, StringType, nullable = true)
-              }
-            })
+            schemaCache = Some(buildSchema(queryParams, iterator.next.record))
           }
         } finally {
           recs.close()
@@ -99,14 +86,33 @@ case class AeroRelation(initialHost: String,
       }
     }
 
-    schemaCache
+    schemaCache.getOrElse(null)
+  }
+
+  def buildSchema(queryParams: QueryParams, record: Record): StructType = {
+    var binNames = queryParams.bins
+    if (isQueryingAllColumns(queryParams.bins)) {
+      binNames = record.bins.keySet.asScala.toSeq
+    }
+
+    StructType(binNames.map { b =>
+      record.bins.get(b) match {
+        case v: Integer => StructField(b, IntegerType, nullable = true)
+        case v: lang.Long => StructField(b, LongType, nullable = true)
+        case _ => StructField(b, StringType, nullable = true)
+      }
+    })
+  }
+
+  def isQueryingAllColumns(bins: Seq[String]): Boolean = {
+    bins.length == 1 && bins.head == "*"
   }
 
   override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
     println("buildScan")
     println(requiredColumns)
     (filters.foreach(println(_)))
-    if (schemaCache == null && nodeList == null) {
+    if (!schemaCache.isDefined && nodeList == null) {
       schema //ensure def schema always called before this method
     }
 
@@ -121,7 +127,7 @@ case class AeroRelation(initialHost: String,
       }
 
       def checkNumeric(attr: String): Boolean = {
-        val attrType: String = schemaCache(attr).dataType.typeName
+        val attrType: String = schemaCache.get(attr).dataType.typeName
         attrType == "long" || attrType == "integer"
       }
 
@@ -194,10 +200,10 @@ case class AeroRelation(initialHost: String,
           tuples = (0 until partitionsPerServer)
             .map(i => (lower + divided * i, if (i == partitionsPerServer - 1) upper else lower + divided * (i + 1) - 1))
         }
-        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterType, filterBin, filterStringVal, tuples, allFilters, schemaCache, useUdfWithoutIndexQuery)
+        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterType, filterBin, filterStringVal, tuples, allFilters, schemaCache.get, useUdfWithoutIndexQuery)
       }
       else {
-        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache, allFilters, schemaCache, useUdfWithoutIndexQuery)
+        new AerospikeRDD(sqlContext.sparkContext, nodeList, namespace, set, requiredColumns, filterTypeCache, filterBinCache, filterStringValCache, filterValsCache, allFilters, schemaCache.get, useUdfWithoutIndexQuery)
       }
     }
     else {
